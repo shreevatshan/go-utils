@@ -30,22 +30,6 @@ func RemoveWhiteSpace(str *string) {
 	*str = strings.ReplaceAll(*str, SPACE, EMPTY_STRING)
 }
 
-func ConvertCommaSeparatedStringToSet(comma_separated_string string) *utildatatype.Set {
-
-	set := utildatatype.InitSet()
-
-	if comma_separated_string != EMPTY_STRING {
-		values := strings.Split(comma_separated_string, COMMA)
-		for i := range values {
-			value, err := strconv.Atoi(values[i])
-			if err == nil {
-				set.Insert(value)
-			}
-		}
-	}
-	return set
-}
-
 func ReturnKeyAndValueFromString(keyvalue_string string) (key, value string) {
 
 	key = EMPTY_STRING
