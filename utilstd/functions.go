@@ -3,7 +3,6 @@ package utilstd
 import (
 	"archive/zip"
 	"crypto/sha256"
-	"dataexporter/pkg/utildatatype"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
