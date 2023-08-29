@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"crypto/rand"
+	"encoding/hex"
 )
 
 func RemoveString(str *string, remove string) {
