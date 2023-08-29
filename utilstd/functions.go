@@ -229,3 +229,15 @@ func Float64ComparisonWithTolerance(a float64, b float64, tolerance float64) boo
 		return false
 	}
 }
+
+// Enter len as a multiple of 2
+func CreateUUID(len int) (string, error) {
+	bytes := make([]byte, len/2)
+	_, err := rand.Read(bytes)
+	if err != nil {
+		return "", err
+	}
+
+	uid := hex.EncodeToString(bytes)
+	return uid, nil
+}
