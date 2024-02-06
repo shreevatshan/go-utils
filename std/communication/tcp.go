@@ -9,16 +9,14 @@ import (
 const (
 	ProtocolTCP              = "tcp"
 	defaultTCPRequestTimeout = 5
-	RequestTypeUni           = "uni"
-	RequestTypeBi            = "bi"
 )
 
 type TCPRequest struct {
-	Timeout int
-	Address string
-	Type    string
-	Delim   byte
-	Body    []byte
+	Timeout         int
+	Address         string
+	WaitForResponse bool
+	Delim           byte
+	Body            []byte
 }
 
 type TCPResponse struct {
@@ -43,9 +41,8 @@ func (req *TCPRequest) Send() TCPResponse {
 		return res
 	}
 
-	if req.Type != RequestTypeUni {
-
-		if req.Timeout == 0 {
+	if req.WaitForResponse {
+		if req.Timeout <= 0 {
 			req.Timeout = defaultTCPRequestTimeout
 		}
 		conn.SetReadDeadline(time.Now().Add(time.Duration(req.Timeout) * time.Second))
