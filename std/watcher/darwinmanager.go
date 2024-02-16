@@ -28,7 +28,7 @@ loop:
 			s.Shutdown()
 			break loop
 		default:
-			s..GetLogger().LogMessage(log.Warning, "Unexpected control request [%s]", signal.String())
+			s.GetLogger().LogMessage(log.Warning, "Unexpected control request [%s]", signal.String())
 		}
 	}
 }
