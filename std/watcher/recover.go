@@ -1,9 +1,10 @@
 package watcher
 
 import (
-	"dataexporter/pkg/std/log"
 	"runtime/debug"
 	"time"
+
+	"github.com/shreevatshan/go-utils/std/log"
 )
 
 func RecoverOnPanic(f func(), opt ...interface{}) {
@@ -14,7 +15,7 @@ func RecoverOnPanic(f func(), opt ...interface{}) {
 
 			if len(opt) > 0 {
 				logger := opt[0].(log.Logger)
-				logger.PanicQuickLog("retrying function execution, panic [%v] triggered at\n%v", r, string(debug.Stack()))
+				logger.Panic("retrying function execution, panic [%v] triggered at\n%v", r, string(debug.Stack()))
 				RecoverOnPanic(f, logger)
 			} else {
 				RecoverOnPanic(f)
@@ -29,7 +30,7 @@ func ExecuteSafe(f func(), opt ...interface{}) {
 		if r := recover(); r != nil {
 			if len(opt) > 0 {
 				logger := opt[0].(log.Logger)
-				logger.PanicQuickLog("function execution stopped, panic [%v] triggered at\n%v", r, string(debug.Stack()))
+				logger.Panic("function execution stopped, panic [%v] triggered at\n%v", r, string(debug.Stack()))
 			}
 		}
 	}()
@@ -43,7 +44,7 @@ func HandlePanic(opt ...interface{}) {
 	if r := recover(); r != nil {
 		if len(opt) > 0 {
 			logger := opt[0].(log.Logger)
-			logger.PanicQuickLog("function execution stopped, panic [%v] triggered at\n%v", r, string(debug.Stack()))
+			logger.Panic("function execution stopped, panic [%v] triggered at\n%v", r, string(debug.Stack()))
 		}
 	}
 }

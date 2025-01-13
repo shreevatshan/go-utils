@@ -1,7 +1,6 @@
 package std
 
 const (
-	EmptyString             = ""
 	Comma                   = ","
 	Colon                   = ":"
 	Semicolon               = ";"

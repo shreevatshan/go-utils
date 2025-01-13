@@ -3,10 +3,12 @@ package std
 import (
 	"strconv"
 	"strings"
+
+	"github.com/shreevatshan/go-utils/std/maps"
 )
 
 func RemoveString(str *string, remove string) {
-	*str = strings.ReplaceAll(*str, remove, EmptyString)
+	*str = strings.ReplaceAll(*str, remove, "")
 }
 
 func ReplaceString(str *string, from string, to string) {
@@ -14,14 +16,14 @@ func ReplaceString(str *string, from string, to string) {
 }
 
 func RemoveWhiteSpace(str *string) {
-	*str = strings.ReplaceAll(*str, Space, EmptyString)
+	*str = strings.ReplaceAll(*str, Space, "")
 }
 
 // Converts comma separated string to set.
 // Set t as 0, if you want to store mixed type values in set.
 // Set t as 1, if you want to store string values in set.
 // Set t as 2, if you want to store int values in set. If conversion fails, it will be ignored.
-func ConvertCommaSeparatedStringToSet(commaSeparatedString string, t ...interface{}) *Set {
+func ConvertCommaSeparatedStringToSet(commaSeparatedString string, t ...interface{}) *maps.Set {
 
 	const (
 		mixedType  = 0
@@ -29,14 +31,14 @@ func ConvertCommaSeparatedStringToSet(commaSeparatedString string, t ...interfac
 		intType    = 2
 	)
 
-	set := InitSet()
+	set := maps.NewSet()
 	var saveas = 0
 
 	if len(t) > 0 {
 		saveas = t[0].(int)
 	}
 
-	if commaSeparatedString != EmptyString {
+	if commaSeparatedString != "" {
 		values := strings.Split(commaSeparatedString, Comma)
 		for i := range values {
 			switch saveas {
@@ -60,10 +62,10 @@ func ConvertCommaSeparatedStringToSet(commaSeparatedString string, t ...interfac
 	return set
 }
 
-func ReturnKeyAndValueFromString(keyvalueString string) (key, value string) {
+func ReturnKeyAndValueFromString(keyvalueString string) (string, string) {
 
-	key = EmptyString
-	value = EmptyString
+	var key string
+	var value string
 
 	lastIndex := strings.LastIndex(keyvalueString, EqualTo)
 	if lastIndex != -1 {
@@ -77,7 +79,7 @@ func ConvertNewlineSeparatedStringToKeyValuePairBasedOnEqual(newlineSeparatedStr
 
 	resultMap := make(map[string]string)
 
-	if newlineSeparatedString != EmptyString {
+	if newlineSeparatedString != "" {
 		individualLines := strings.Split(newlineSeparatedString, NewLineAsString)
 		for i := range individualLines {
 			individualLine := individualLines[i]
@@ -94,7 +96,7 @@ func ConvertNewlineSeparatedStringToKeyValuePairBasedOnEqualAndComma(newlineSepa
 
 	resultMap := make(map[string]string)
 
-	if newlineSeparatedString != EmptyString {
+	if newlineSeparatedString != "" {
 		individualLines := strings.Split(newlineSeparatedString, NewLineAsString)
 		for i := range individualLines {
 			individualLine := individualLines[i]
@@ -113,4 +115,24 @@ func ConvertNewlineSeparatedStringToKeyValuePairBasedOnEqualAndComma(newlineSepa
 
 func HasPrefixCaseInsensitive(stringToCheck string, stringToCompare string) bool {
 	return strings.HasPrefix(strings.ToLower(stringToCheck), strings.ToLower(stringToCompare))
+}
+
+// NonEmptyStrings filters out empty strings from the provided variadic string arguments.
+// It returns a slice containing only the non-empty strings.
+//
+// Parameters:
+//
+//	str - variadic string arguments to be filtered.
+//
+// Returns:
+//
+//	[]string - a slice containing only the non-empty strings from the input.
+func NonEmptyStrings(str ...string) []string {
+	var result []string
+	for i := range str {
+		if str[i] != "" {
+			result = append(result, str[i])
+		}
+	}
+	return result
 }

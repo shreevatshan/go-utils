@@ -4,10 +4,11 @@
 package watcher
 
 import (
-	"dataexporter/pkg/std/log"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/shreevatshan/go-utils/std/log"
 
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/debug"
@@ -85,7 +86,7 @@ func StartServiceManager(ser service) {
 
 	isWindowsservice, err := svc.IsWindowsService()
 	if err != nil {
-		s.GetLogger().LogMessage(log.Warning, "Failed to determine if running as service [%v]", err)
+		s.GetLogger().Warning("Failed to determine if running as service [%v]", err)
 	}
 	if isWindowsservice {
 		runWindowsService()

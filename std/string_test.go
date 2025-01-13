@@ -81,23 +81,23 @@ func TestConvertCommaSeparatedStringToSet(t *testing.T) {
 	tests := []struct {
 		name string
 		args args
-		want map[string]struct{}
+		want []int
 	}{
-		{name: "test", args: args{commaSeparatedString: "1,2,3,4,5"}, want: map[string]struct{}{
-			"1": struct{}{},
-			"2": struct{}{},
-			"3": struct{}{},
-			"4": struct{}{},
-			"5": struct{}{},
+		{name: "test", args: args{commaSeparatedString: "1,2,3,4,5"}, want: []int{
+			1,
+			2,
+			3,
+			4,
+			5,
 		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := ConvertCommaSeparatedStringToSet(tt.args.commaSeparatedString)
 
-			for k := range tt.want {
-				if got.Elements[k] != tt.want[k] {
-					t.Errorf("ConvertCommaSeparatedStringToSet() = %v, want %v", got.Elements[k], tt.want[k])
+			for _, k := range tt.want {
+				if !got.Exists(k) {
+					t.Errorf("ConvertCommaSeparatedStringToSet() = %v, want %v, element does not exist %v", got.List(), tt.want, k)
 				}
 			}
 

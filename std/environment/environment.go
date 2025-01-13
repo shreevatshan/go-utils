@@ -1,31 +1,33 @@
 package environment
 
 import (
-	"dataexporter/pkg/std"
-	"dataexporter/pkg/std/communication"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sync"
+
+	"github.com/shreevatshan/go-utils/std/communication"
 )
 
 const (
-	cloudTypeAWS       = "AWS"
-	cloudTypeAZURE     = "AZURE"
-	cloudTypeGCP       = "GCP"
-	cloudTypeGeneric   = "CLOUD"
-	urlAWSInstanceID   = "http://169.254.169.254/latest/meta-data/instance-id"
-	urlAWSToken        = "http://169.254.169.254/latest/api/token"
-	urlAWSMetaData     = "http://169.254.169.254/latest/meta-data/"
-	urlAZUREInstanceId = "http://169.254.169.254/metadata/instance/compute/vmId?api-version=2017-08-01&format=text"
-	urlGCPInstanceID   = "http://169.254.169.254/computeMetadata/v1/instance/id"
-	urlGenericCloud    = "http://169.254.169.254/"
+	cloudTypeAWS        = "AWS"
+	cloudTypeAZURE      = "AZURE"
+	cloudTypeGCP        = "GCP"
+	cloudTypeGeneric    = "CLOUD"
+	urlAWSInstanceID    = "http://169.254.169.254/latest/meta-data/instance-id"
+	urlAWSToken         = "http://169.254.169.254/latest/api/token"
+	urlAWSAutoScaling   = "http://169.254.169.254/latest/meta-data/autoscaling/target-lifecycle-state"
+	urlAZUREInstanceId  = "http://169.254.169.254/metadata/instance/compute/vmId?api-version=2017-08-01&format=text"
+	urlAZUREAutoScaling = "http://169.254.169.254/metadata/instance/compute/vmScaleSetName?api-version=2023-11-15&format=text"
+	urlGCPInstanceID    = "http://169.254.169.254/computeMetadata/v1/instance/id"
+	urlGenericCloud     = "http://169.254.169.254/"
 )
 
 type cloudInfo struct {
 	isCloudinstance   bool
 	cloudinstanceType string
 	cloudinstanceID   string
+	isAutoScaling     bool
 }
 
 type Environment struct {
@@ -35,108 +37,158 @@ type Environment struct {
 	cloudInfo          cloudInfo
 }
 
-func isAWSInstance() (bool, string) {
+func isAWSInstance() cloudInfo {
+
+	cloudInfo := cloudInfo{cloudinstanceType: cloudTypeAWS, isAutoScaling: true}
 
 	request1 := communication.HTTPRequest{
-		RequestType: communication.RequestTypeGet,
+		RequestType: communication.RequestTypeGET,
 		API:         urlAWSInstanceID,
 		TimeOut:     5,
 	}
 
 	response1 := request1.Send()
+
 	if response1.Err == nil {
 
+		cloudInfo.isCloudinstance = true
+
 		if len(response1.Body) > 0 {
-			return true, string(response1.Body)
+			cloudInfo.cloudinstanceID = string(response1.Body)
 		}
 
-		return true, std.EmptyString
-
 	} else {
-
+		// verification for IMDSv2
 		request2 := communication.HTTPRequest{
-			RequestType: communication.RequestTypePut,
+			RequestType: communication.RequestTypePUT,
 			API:         urlAWSToken,
 			Headers:     map[string]string{"X-aws-ec2-metadata-token-ttl-seconds": "21600"},
 			TimeOut:     5,
 		}
+
 		response2 := request2.Send()
 
 		if response2.Err == nil {
 
 			request3 := communication.HTTPRequest{
-				RequestType: communication.RequestTypeGet,
-				API:         urlAWSMetaData,
+				RequestType: communication.RequestTypeGET,
+				API:         urlAWSInstanceID,
 				Headers:     map[string]string{"X-aws-ec2-metadata-token": string(response2.Body)},
 				TimeOut:     5,
 			}
 			response3 := request3.Send()
 
 			if response3.Err == nil {
+
+				cloudInfo.isCloudinstance = true
+
 				if len(response3.Body) > 0 {
-					return true, string(response3.Body)
+					cloudInfo.cloudinstanceID = string(response3.Body)
 				}
-				return true, std.EmptyString
 			}
 		}
 	}
 
-	return false, std.EmptyString
+	if cloudInfo.isCloudinstance {
+		// check for auto scaling
+		request4 := communication.HTTPRequest{
+			RequestType: communication.RequestTypeGET,
+			API:         urlAWSAutoScaling,
+			TimeOut:     5,
+		}
+
+		response4 := request4.Send()
+
+		if response4.Err != nil {
+			cloudInfo.isAutoScaling = false
+		}
+	}
+	return cloudInfo
 }
 
-func isGCPInstance() (bool, string) {
+func isGCPInstance() cloudInfo {
+
+	cloudInfo := cloudInfo{cloudinstanceType: cloudTypeGCP, isAutoScaling: true}
 
 	request := communication.HTTPRequest{
-		RequestType: communication.RequestTypeGet,
+		RequestType: communication.RequestTypeGET,
 		API:         urlGCPInstanceID,
 		Headers:     map[string]string{"Metadata-Flavor": "Google"},
 		TimeOut:     5,
 	}
 
 	response := request.Send()
-	if response.Err != nil {
-		return false, std.EmptyString
+
+	if response.Err == nil {
+
+		cloudInfo.isCloudinstance = true
+
+		if len(response.Body) > 0 {
+			cloudInfo.cloudinstanceID = string(response.Body)
+		}
 	}
 
-	if len(response.Body) > 0 {
-		return true, string(response.Body)
-	}
-
-	return true, std.EmptyString
+	return cloudInfo
 }
 
-func isAZUREInstance() (bool, string) {
+func isAZUREInstance() cloudInfo {
+
+	cloudInfo := cloudInfo{cloudinstanceType: cloudTypeAZURE, isAutoScaling: true}
 
 	request := communication.HTTPRequest{
-		RequestType: communication.RequestTypeGet,
+		RequestType: communication.RequestTypeGET,
 		API:         urlAZUREInstanceId,
 		Headers:     map[string]string{"Metadata": "true"},
 		TimeOut:     5,
 	}
 
 	response := request.Send()
-	if response.Err != nil {
-		return false, std.EmptyString
+
+	if response.Err == nil {
+
+		cloudInfo.isCloudinstance = true
+
+		if len(response.Body) > 0 {
+			cloudInfo.cloudinstanceID = string(response.Body)
+		}
 	}
 
-	if len(response.Body) > 0 {
-		return true, string(response.Body)
+	if cloudInfo.isCloudinstance {
+		// check for auto scaling
+		request4 := communication.HTTPRequest{
+			RequestType: communication.RequestTypeGET,
+			API:         urlAZUREAutoScaling,
+			Headers:     map[string]string{"Metadata": "true"},
+			TimeOut:     5,
+		}
+
+		response4 := request4.Send()
+
+		if response4.Err != nil || len(response4.Body) == 0 {
+			cloudInfo.isAutoScaling = false
+		}
 	}
 
-	return true, std.EmptyString
+	return cloudInfo
 }
 
-func isOtherCloudInstance() bool {
+func isOtherCloudInstance() cloudInfo {
+
+	cloudInfo := cloudInfo{cloudinstanceType: cloudTypeGeneric, isAutoScaling: true}
 
 	request := communication.HTTPRequest{
-		RequestType: communication.RequestTypeGet,
+		RequestType: communication.RequestTypeGET,
 		API:         urlGenericCloud,
 		TimeOut:     5,
 	}
 
 	response := request.Send()
 
-	return response.Err == nil
+	if response.Err == nil {
+		cloudInfo.isCloudinstance = true
+	}
+
+	return cloudInfo
 }
 
 func Init() *Environment {
@@ -172,53 +224,45 @@ func (environmentDetails *Environment) setInstallPath() {
 func (environmentDetails *Environment) setCloudInfo() {
 
 	var wg sync.WaitGroup
-	var isGCP, isAWS, isAZURE, isOtherCloud bool
-	var idGCP, idAWS, idAZURE string
 
 	wg.Add(1)
 	go func() {
-		isAWS, idAWS = isAWSInstance()
+		info := isAWSInstance()
+		if info.isCloudinstance {
+			environmentDetails.cloudInfo = info
+		}
 		wg.Done()
 	}()
 
 	wg.Add(1)
 	go func() {
-		isGCP, idGCP = isGCPInstance()
+		info := isGCPInstance()
+		if info.isCloudinstance {
+			environmentDetails.cloudInfo = info
+		}
 		wg.Done()
 	}()
 
 	wg.Add(1)
 	go func() {
-		isAZURE, idAZURE = isAZUREInstance()
+		info := isAZUREInstance()
+		if info.isCloudinstance {
+			environmentDetails.cloudInfo = info
+		}
 		wg.Done()
 	}()
 
 	wg.Add(1)
 	go func() {
-		isOtherCloud = isOtherCloudInstance()
+		info := isOtherCloudInstance()
+		if info.isCloudinstance {
+			environmentDetails.cloudInfo = info
+		}
 		wg.Done()
 	}()
 
 	wg.Wait()
 
-	if isAWS || isGCP || isAZURE || isOtherCloud {
-
-		environmentDetails.cloudInfo.isCloudinstance = true
-
-		if isAWS {
-			environmentDetails.cloudInfo.cloudinstanceType = cloudTypeAWS
-			environmentDetails.cloudInfo.cloudinstanceID = idAWS
-		} else if isGCP {
-			environmentDetails.cloudInfo.cloudinstanceType = cloudTypeGCP
-			environmentDetails.cloudInfo.cloudinstanceID = idGCP
-		} else if isAZURE {
-			environmentDetails.cloudInfo.cloudinstanceType = cloudTypeAZURE
-			environmentDetails.cloudInfo.cloudinstanceID = idAZURE
-		} else {
-			environmentDetails.cloudInfo.cloudinstanceType = cloudTypeGeneric
-		}
-
-	}
 }
 
 func (environmentDetails *Environment) GetOperatingSystem() string {
@@ -243,4 +287,8 @@ func (environmentDetails *Environment) GetCloudInstanceType() string {
 
 func (environmentDetails *Environment) GetCloudInstanceID() string {
 	return environmentDetails.cloudInfo.cloudinstanceID
+}
+
+func (environmentDetails *Environment) GetIsAutoScaling() bool {
+	return environmentDetails.cloudInfo.isAutoScaling
 }

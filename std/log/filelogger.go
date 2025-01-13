@@ -9,124 +9,123 @@ import (
 )
 
 type FileLog struct {
+	FileLogConfig
 	receive           bool
-	loglevel          int
-	logsize           int
-	buffersize        int
-	filename          string
-	location          string
 	done              chan struct{}
-	rotate            chan struct{}
-	buffer            chan string
+	rotateSignal      chan struct{}
+	queue             chan string
+	queueSize         atomic.Int32
 	logfiledescriptor *os.File
 	wg                sync.WaitGroup
 	mu                sync.Mutex
-	currentsize       atomic.Int32
+	bytesWritten      int
 }
 
-/*
-syntax:
+type FileLogConfig struct {
+	filename string
+	location string
+	level    Level
+	size     int
+	buffer   int
+	maxFiles int
+}
 
-	Init(logFilename string, logLocation string, logLevel int, logSize int, bufferSize int)
+type FileLogOptions func(*FileLogConfig)
 
-mandatory:
+func WithFilename(filename string) FileLogOptions {
+	return func(cfg *FileLogConfig) {
+		cfg.filename = filename
+	}
+}
 
-	logFilename, logLocation, logLevel
+func WithLocation(location string) FileLogOptions {
+	return func(cfg *FileLogConfig) {
+		cfg.location = location
+	}
+}
 
-optional:
+func WithLevel(level Level) FileLogOptions {
+	return func(cfg *FileLogConfig) {
+		cfg.level = level
+	}
+}
 
-	logSize, bufferSize
-*/
-func InitFileLogger(logFilename string, logLocation string, logLevel int, args ...interface{}) *FileLog {
+func WithSize(size int) FileLogOptions {
+	return func(cfg *FileLogConfig) {
+		cfg.size = size
+	}
+}
 
-	var logSize int
-	var bufferSize = defaultBufferSize
+func WithBuffer(buffer int) FileLogOptions {
+	return func(cfg *FileLogConfig) {
+		cfg.buffer = buffer
+	}
+}
 
-	for index, arg := range args {
-		switch index {
-		case 0:
-			if arg != nil {
-				logSize = arg.(int)
-			}
-		case 1:
-			if arg != nil {
-				bufferSize = arg.(int)
-			}
-		}
+func WithMaxFiles(maxFiles int) FileLogOptions {
+	return func(cfg *FileLogConfig) {
+		cfg.maxFiles = maxFiles
+	}
+}
+
+func NewFileLogConfig(options ...FileLogOptions) FileLogConfig {
+	config := FileLogConfig{
+		level:    NoLog,
+		size:     defaultSize,
+		buffer:   defaultBuffer,
+		maxFiles: 10,
 	}
 
+	for _, option := range options {
+		option(&config)
+	}
+
+	return config
+}
+
+func NewFileLogger(cfg FileLogConfig) *FileLog {
+
 	logger := &FileLog{
-		loglevel:   logLevel,
-		filename:   logFilename,
-		location:   logLocation,
-		logsize:    logSize,
-		buffersize: bufferSize,
-		buffer:     make(chan string, bufferSize),
-		done:       make(chan struct{}, 1),
-		rotate:     make(chan struct{}, 1),
+		FileLogConfig: cfg,
+		queue:         make(chan string, cfg.buffer),
+		done:          make(chan struct{}, 1),
+		rotateSignal:  make(chan struct{}, 1),
 	}
 
 	return logger
 }
 
-/*
-syntax:
+func (logger *FileLog) Update(cfg FileLogConfig) error {
 
-	Update(logFilename string, logLocation string, logLevel int, logSize int, bufferSize int)
+	if (logger.filename != cfg.filename) ||
+		(logger.location != cfg.location) ||
+		(logger.level != cfg.level) ||
+		(logger.size != cfg.size) ||
+		(logger.buffer != cfg.buffer) ||
+		(logger.maxFiles != cfg.maxFiles) {
 
-mandatory:
-
-	logFilename, logLocation, logLevel
-
-optional:
-
-	logSize, bufferSize
-*/
-func (logger *FileLog) Update(logFilename string, logLocation string, logLevel int, args ...interface{}) error {
-	var err error
-	var bufferSize = defaultBufferSize
-
-	logSize := logger.logsize
-
-	for index, arg := range args {
-		switch index {
-		case 0:
-			if arg != nil {
-				logSize = arg.(int)
-			}
-		case 1:
-			if arg != nil {
-				bufferSize = arg.(int)
-			}
-		}
-	}
-
-	if (logger.filename != logFilename) || (logger.location != logLocation) || (logger.loglevel != logLevel) || (logger.logsize != logSize) || (logger.buffersize != bufferSize) {
 		logger.Stop()
 
-		logger.filename = logFilename
-		logger.location = logLocation
-		logger.loglevel = logLevel
-		logger.logsize = logSize
-		logger.buffersize = bufferSize
-		logger.buffer = make(chan string, bufferSize)
+		logger.FileLogConfig = cfg
+		logger.queue = make(chan string, cfg.buffer)
 
-		err = logger.Start()
+		return logger.Start()
 	}
-	return err
+
+	return nil
 }
 
 func (logger *FileLog) open() error {
 	var err error
 
-	err = os.MkdirAll(logger.location, 0777)
+	err = os.MkdirAll(logger.location, 0755)
 	if err != nil {
 		return err
 	}
 
 	logfilename := filepath.Join(logger.location, logger.filename)
 
-	logger.logfiledescriptor, err = os.OpenFile(logfilename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
+	logger.logfiledescriptor, err = os.OpenFile(logfilename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 
 	return err
 }
@@ -138,6 +137,7 @@ func (logger *FileLog) close() error {
 func (logger *FileLog) Start() error {
 
 	logger.mu.Lock()
+	defer logger.mu.Unlock()
 
 	if logger.receive {
 		return fmt.Errorf("logger already in running state")
@@ -146,7 +146,7 @@ func (logger *FileLog) Start() error {
 	err := logger.open()
 
 	if err == nil {
-		logger.logfiledescriptor.Write([]byte(formatMessage(msgPrefixInfo, "STARTED")))
+		logger.logfiledescriptor.Write([]byte(formatMessage(info, "STARTED")))
 		logger.receive = true
 		logger.wg.Add(1)
 		go func() {
@@ -155,14 +155,13 @@ func (logger *FileLog) Start() error {
 		}()
 	}
 
-	logger.mu.Unlock()
-
 	return err
 }
 
 func (logger *FileLog) Stop() {
 
 	logger.mu.Lock()
+	defer logger.mu.Unlock()
 
 	if logger.receive {
 		logger.receive = false
@@ -172,81 +171,52 @@ func (logger *FileLog) Stop() {
 		}
 
 		logger.wg.Wait()
-		logger.logfiledescriptor.Write([]byte(formatMessage(msgPrefixInfo, "STOPPED")))
+		logger.logfiledescriptor.Write([]byte(formatMessage(info, "STOPPED")))
 		logger.close()
 	}
 
-	logger.mu.Unlock()
 }
 
-func (logger *FileLog) RenameOldLogFiles() {
+func (logger *FileLog) renameOldLogFiles() {
 
 	newestLogFilename := filepath.Join(logger.location, logger.filename)
-	logFilename1 := filepath.Join(logger.location, logger.filename+".1")
-	logFilename2 := filepath.Join(logger.location, logger.filename+".2")
-	logFilename3 := filepath.Join(logger.location, logger.filename+".3")
-	logFilename4 := filepath.Join(logger.location, logger.filename+".4")
-	logFilename5 := filepath.Join(logger.location, logger.filename+".5")
-	logFilename6 := filepath.Join(logger.location, logger.filename+".6")
-	logFilename7 := filepath.Join(logger.location, logger.filename+".7")
-	logFilename8 := filepath.Join(logger.location, logger.filename+".8")
-	logFilename9 := filepath.Join(logger.location, logger.filename+".9")
-	oldestLogFilename := filepath.Join(logger.location, logger.filename+".10")
+	var oldLogFilename, newLogFilename string
 
-	if _, err := os.Stat(logFilename9); err == nil {
-		os.Rename(logFilename9, oldestLogFilename)
+	for i := logger.maxFiles - 1; i > 0; i-- {
+		oldLogFilename = filepath.Join(logger.location, fmt.Sprintf("%s.%d", logger.filename, i))
+		newLogFilename = filepath.Join(logger.location, fmt.Sprintf("%s.%d", logger.filename, i+1))
+		if _, err := os.Stat(oldLogFilename); err == nil {
+			os.Rename(oldLogFilename, newLogFilename)
+		}
 	}
-	if _, err := os.Stat(logFilename8); err == nil {
-		os.Rename(logFilename8, logFilename9)
-	}
-	if _, err := os.Stat(logFilename7); err == nil {
-		os.Rename(logFilename7, logFilename8)
-	}
-	if _, err := os.Stat(logFilename6); err == nil {
-		os.Rename(logFilename6, logFilename7)
-	}
-	if _, err := os.Stat(logFilename5); err == nil {
-		os.Rename(logFilename5, logFilename6)
-	}
-	if _, err := os.Stat(logFilename4); err == nil {
-		os.Rename(logFilename4, logFilename5)
-	}
-	if _, err := os.Stat(logFilename3); err == nil {
-		os.Rename(logFilename3, logFilename4)
-	}
-	if _, err := os.Stat(logFilename2); err == nil {
-		os.Rename(logFilename2, logFilename3)
-	}
-	if _, err := os.Stat(logFilename1); err == nil {
-		os.Rename(logFilename1, logFilename2)
-	}
+
 	if _, err := os.Stat(newestLogFilename); err == nil {
-		os.Rename(newestLogFilename, logFilename1)
+		os.Rename(newestLogFilename, filepath.Join(logger.location, logger.filename+".1"))
 	}
 }
 
 func (logger *FileLog) Rotate() {
-
 	logger.mu.Lock()
+	defer logger.mu.Unlock()
 
-	logfilename := filepath.Join(logger.location, logger.filename)
-
-	if file, err := os.Stat(logfilename); err == nil {
-		size := file.Size()
-		if size > int64(logger.logsize) {
-			if len(logger.rotate) < 1 {
-				logger.rotate <- struct{}{}
-			}
-		}
+	if len(logger.rotateSignal) < 1 { // accept signal only if previous rotate signal is consumed
+		logger.rotateSignal <- struct{}{}
 	}
-
-	logger.mu.Unlock()
 }
 
-func (logger *FileLog) bufferMessage(message string) {
-	if (logger.currentsize.Load() < int32(logger.buffersize)) && logger.receive {
-		logger.currentsize.Add(1)
-		logger.buffer <- message
+func (logger *FileLog) queueMessage(message string) {
+	if (logger.queueSize.Load() < int32(logger.buffer)) && logger.receive {
+		logger.queueSize.Add(1)
+		logger.queue <- message
+	}
+}
+
+func (logger *FileLog) write(msg []byte) {
+	n, _ := logger.logfiledescriptor.Write(msg)
+	logger.bytesWritten += n
+	if logger.bytesWritten > logger.size {
+		logger.Rotate()
+		logger.bytesWritten = 0
 	}
 }
 
@@ -256,68 +226,42 @@ func (logger *FileLog) flusher() {
 		case <-logger.done:
 			for {
 				select {
-				case msg := <-logger.buffer:
-					logger.currentsize.Add(-1)
-					logger.logfiledescriptor.Write([]byte(msg))
+				case msg := <-logger.queue:
+					logger.queueSize.Add(-1)
+					logger.write([]byte(msg))
 				default:
 					return
 				}
 			}
-		case <-logger.rotate:
+		case <-logger.rotateSignal:
 			logger.close()
-			logger.RenameOldLogFiles()
+			logger.renameOldLogFiles()
 			logger.open()
-		case msg := <-logger.buffer:
-			logger.currentsize.Add(-1)
-			logger.logfiledescriptor.Write([]byte(msg))
+		case msg := <-logger.queue:
+			logger.queueSize.Add(-1)
+			logger.write([]byte(msg))
 		}
 	}
 }
 
-func (logger *FileLog) LogMessage(level int, format string, args ...interface{}) {
+func (logger *FileLog) WithLevel(level Level, format string, args ...interface{}) {
 
-	if logger.loglevel >= level {
+	if logger.level >= level {
 
-		var prefix string
-		switch level {
-		case Info:
-			prefix = msgPrefixInfo
-		case Warning:
-			prefix = msgPrefixWarning
-		case Debug:
-			prefix = msgPrefixDebug
-		case Trace:
-			prefix = msgPrefixTrace
-		default:
-			return
-		}
+		logMessage := formatMessage(level.String(), fmt.Sprintf(format, args...))
 
-		logMessage := formatMessage(prefix, fmt.Sprintf(format, args...))
-
-		logger.bufferMessage(logMessage)
+		logger.queueMessage(logMessage)
 	}
 }
 
-func (logger *FileLog) QuickLog(level int, format string, args ...interface{}) {
+func (logger *FileLog) Quick(level Level, format string, args ...interface{}) {
 
 	logger.mu.Lock()
-	if logger.loglevel >= level {
+	defer logger.mu.Unlock()
 
-		var prefix string
-		switch level {
-		case Info:
-			prefix = msgPrefixInfo
-		case Warning:
-			prefix = msgPrefixWarning
-		case Debug:
-			prefix = msgPrefixDebug
-		case Trace:
-			prefix = msgPrefixTrace
-		default:
-			return
-		}
+	if logger.level >= level {
 
-		logMessage := formatMessage(prefix, fmt.Sprintf(format, args...))
+		logMessage := formatMessage(level.String(), fmt.Sprintf(format, args...))
 
 		err := logger.open()
 
@@ -328,43 +272,43 @@ func (logger *FileLog) QuickLog(level int, format string, args ...interface{}) {
 		logger.close()
 	}
 
-	logger.mu.Unlock()
 }
 
-func (logger *FileLog) PanicQuickLog(format string, args ...interface{}) {
+func (logger *FileLog) Panic(format string, args ...interface{}) {
 	logger.mu.Lock()
-	logMessage := formatMessage(msgPrefixPanic, fmt.Sprintf(format, args...))
-	err := os.MkdirAll(logger.location, 0777)
+	defer logger.mu.Unlock()
+
+	logMessage := formatMessage(panic, fmt.Sprintf(format, args...))
+	err := os.MkdirAll(logger.location, 0755)
 	if err == nil {
-		os.WriteFile(filepath.Join(logger.location, "panic."+logger.filename), []byte(logMessage), 0666)
-	}
-	logger.mu.Unlock()
-}
-
-func (logger *FileLog) InfoLog(format string, args ...interface{}) {
-	if logger.loglevel >= Info {
-		logMessage := formatMessage(msgPrefixInfo, fmt.Sprintf(format, args...))
-		logger.bufferMessage(logMessage)
+		os.WriteFile(filepath.Join(logger.location, "panic."+logger.filename), []byte(logMessage), 0755)
 	}
 }
 
-func (logger *FileLog) DebugLog(format string, args ...interface{}) {
-	if logger.loglevel >= Debug {
-		logMessage := formatMessage(msgPrefixDebug, fmt.Sprintf(format, args...))
-		logger.bufferMessage(logMessage)
+func (logger *FileLog) Info(format string, args ...interface{}) {
+	if logger.level >= Info {
+		logMessage := formatMessage(info, fmt.Sprintf(format, args...))
+		logger.queueMessage(logMessage)
 	}
 }
 
-func (logger *FileLog) WarningLog(format string, args ...interface{}) {
-	if logger.loglevel >= Warning {
-		logMessage := formatMessage(msgPrefixWarning, fmt.Sprintf(format, args...))
-		logger.bufferMessage(logMessage)
+func (logger *FileLog) Debug(format string, args ...interface{}) {
+	if logger.level >= Debug {
+		logMessage := formatMessage(debug, fmt.Sprintf(format, args...))
+		logger.queueMessage(logMessage)
 	}
 }
 
-func (logger *FileLog) TraceLog(format string, args ...interface{}) {
-	if logger.loglevel >= Trace {
-		logMessage := formatMessage(msgPrefixTrace, fmt.Sprintf(format, args...))
-		logger.bufferMessage(logMessage)
+func (logger *FileLog) Warning(format string, args ...interface{}) {
+	if logger.level >= Warning {
+		logMessage := formatMessage(warning, fmt.Sprintf(format, args...))
+		logger.queueMessage(logMessage)
+	}
+}
+
+func (logger *FileLog) Trace(format string, args ...interface{}) {
+	if logger.level >= Trace {
+		logMessage := formatMessage(trace, fmt.Sprintf(format, args...))
+		logger.queueMessage(logMessage)
 	}
 }

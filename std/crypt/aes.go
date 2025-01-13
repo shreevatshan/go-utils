@@ -2,7 +2,11 @@ package crypt
 
 import (
 	"crypto/aes"
+	"crypto/cipher"
 	"encoding/base64"
+	"fmt"
+
+	"github.com/shreevatshan/go-utils/std"
 )
 
 // Helper function to repeat a byte multiple times
@@ -14,81 +18,85 @@ func bytesRepeating(b byte, count int) []byte {
 	return result
 }
 
-// Helper function to convert secret key into an AES-compatible key.
-func convertToAESKey(secretKey []byte) []byte {
-	// valid AES key sizes
-	validKeySizes := []int{16, 24, 32}
-
-	// Find the closest valid key size
-	validSize := validKeySizes[0]
-	for _, size := range validKeySizes {
-		if len(secretKey) <= size {
-			validSize = size
-			break
-		}
-	}
-
+// Helper functions to convert secret key into an AES-128 compatible key.
+func ConvertToAES128Key(secretKey []byte) []byte {
 	// Pad or truncate the secret key to the valid size
-	aesKey := make([]byte, validSize)
+	aesKey := make([]byte, 16)
 	copy(aesKey, secretKey)
 
 	return aesKey
 }
 
-// EncryptAES encrypts a plaintext using AES encryption in ECB mode
-func EncryptAES(plainText, secretKey string) (string, error) {
-	// Convert the secret key to a fixed-length AES key
-	key := convertToAESKey([]byte(secretKey))
+// Helper functions to convert secret key into an AES-192 compatible key.
+func ConvertToAES192Key(secretKey []byte) []byte {
+	// Pad or truncate the secret key to the valid size
+	aesKey := make([]byte, 24)
+	copy(aesKey, secretKey)
 
-	// Create a new AES cipher block
-	block, err := aes.NewCipher(key)
+	return aesKey
+}
+
+// Helper functions to convert secret key into an AES-256 compatible key.
+func ConvertToAES256Key(secretKey []byte) []byte {
+	// Pad or truncate the secret key to the valid size
+	aesKey := make([]byte, 32)
+	copy(aesKey, secretKey)
+
+	return aesKey
+}
+
+func AESEncrypt(plainText, secretKey, iv []byte) (string, error) {
+	block, err := aes.NewCipher(secretKey)
 	if err != nil {
 		return "", err
 	}
 
-	// Pad the plaintext to be a multiple of the block size
-	plainTextBytes := []byte(plainText)
-	padding := aes.BlockSize - len(plainTextBytes)%aes.BlockSize
-	padText := append(plainTextBytes, bytesRepeating(byte(padding), padding)...)
-
-	// Encrypt the padded plaintext using ECB mode
-	ciphertext := make([]byte, len(padText))
-	blockSize := block.BlockSize()
-	for i := 0; i < len(padText); i += blockSize {
-		block.Encrypt(ciphertext[i:i+blockSize], padText[i:i+blockSize])
+	if len(iv) != block.BlockSize() {
+		return "", fmt.Errorf("iv size is incorrect")
 	}
+
+	stream := cipher.NewCBCEncrypter(block, iv)
+
+	padding := aes.BlockSize - len(plainText)%aes.BlockSize
+	plainText = append(plainText, bytesRepeating(byte(padding), padding)...)
+
+	ciphertext := make([]byte, len(plainText))
+	stream.CryptBlocks(ciphertext, plainText)
 
 	return base64.StdEncoding.EncodeToString(ciphertext), nil
 }
 
-// DecryptAES decrypts an AES-encrypted string in ECB mode
-func DecryptAES(ciphertext, secretKey string) (string, error) {
-	// Convert the secret key to a fixed-length AES key
-	key := convertToAESKey([]byte(secretKey))
+func AESDecrypt(encrypted, secretKey, iv []byte) (string, error) {
 
-	// Decode the base64-encoded ciphertext
-	decodedCiphertext, err := base64.StdEncoding.DecodeString(ciphertext)
+	ciphertext, err := std.DecodeBase64(encrypted)
 	if err != nil {
 		return "", err
 	}
 
-	// Create a new AES cipher block
-	block, err := aes.NewCipher(key)
+	block, err := aes.NewCipher(secretKey)
 	if err != nil {
 		return "", err
 	}
 
-	// Create a buffer for the decrypted plaintext
-	decryptedText := make([]byte, len(decodedCiphertext))
-	blockSize := block.BlockSize()
-	for i := 0; i < len(decodedCiphertext); i += blockSize {
-		block.Decrypt(decryptedText[i:i+blockSize], decodedCiphertext[i:i+blockSize])
+	if len(ciphertext) < aes.BlockSize {
+		return "", fmt.Errorf("ciphertext too short")
 	}
 
-	// Unpad the decrypted plaintext
-	paddingByte := decryptedText[len(decryptedText)-1]
-	padding := int(paddingByte)
-	plainText := decryptedText[:len(decryptedText)-padding]
+	if len(iv) != block.BlockSize() {
+		return "", fmt.Errorf("iv size is incorrect")
+	}
+
+	if len(ciphertext)%aes.BlockSize != 0 {
+		return "", fmt.Errorf("ciphertext is not a multiple of the block size")
+	}
+
+	stream := cipher.NewCBCDecrypter(block, iv)
+
+	plainText := make([]byte, len(ciphertext))
+	stream.CryptBlocks(plainText, []byte(ciphertext))
+
+	padding := int(plainText[len(plainText)-1])
+	plainText = plainText[:len(plainText)-padding]
 
 	return string(plainText), nil
 }

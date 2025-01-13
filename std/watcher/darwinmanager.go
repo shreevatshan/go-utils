@@ -4,10 +4,11 @@
 package watcher
 
 import (
-	"dataexporter/pkg/std/log"
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/shreevatshan/go-utils/std/log"
 )
 
 type service interface {
@@ -24,11 +25,11 @@ loop:
 		signal := <-signalChannel
 		switch signal {
 		case syscall.SIGTERM:
-			s.GetLogger().LogMessage(log.Info, "Control request received [%s]", signal.String())
+			s.GetLogger().Info("Control request received [%s]", signal.String())
 			s.Shutdown()
 			break loop
 		default:
-			s.GetLogger().LogMessage(log.Warning, "Unexpected control request [%s]", signal.String())
+			s.GetLogger().Warning("Unexpected control request [%s]", signal.String())
 		}
 	}
 }
